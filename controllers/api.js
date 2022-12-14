@@ -5,7 +5,7 @@ const secretEncoding = process.env.SECRET_ENCODING
 const AccModel = require('./../models/account');
 module.exports = class API {
 	static async getOtp(req, res) {
-		var result = { success: false, src: '', ascii: '' }
+		var result = { success: false, src: '' }
 		try {
 			//Search if username is taken
 			req.body.username = 'req.body.username'
@@ -36,8 +36,8 @@ module.exports = class API {
 			var secret = speakeasy.generateSecret({
 				name: '2FA-Demo'
 			})
-			result.ascii = secret[secretEncoding];
 			result.src = await qrcode.toDataURL(secret.otpauth_url)
+			result.code = secret[secretEncoding]
 			result.success = true
 			console.log(secret);
 		}
@@ -48,7 +48,7 @@ module.exports = class API {
 	}
 
 	static async signup(req, res) {
-		var result = { success: false, src: '', ascii: '' }
+		var result = { success: false, src: '' }
 		try {
 
 			//Search if username is taken
@@ -63,24 +63,50 @@ module.exports = class API {
 			if (!req.body.username) throw "Missing username"
 			if (!req.body.secret) throw "Missing secret"
 
+
+			var json = {
+				secret: req.body.secret, //secret from db belong to the username 
+				encoding: secretEncoding,
+				token: req.body.token, //6 digit token from API
+			}
+			console.log(json);
+			var result;
+
+			const flag = speakeasy.totp.verify(json);
+			if (flag != true) {
+
+				throw "Invalid Token"
+			}
+
+
+
 			//Prepare data to save
 			var accDoc = new AccModel()
 			accDoc.username = req.body.username
 			accDoc.secret = req.body.secret
 			accDoc.encoding = secretEncoding
 			accDoc.source = sourceChannel
+
+
+
 			//Save to database
 			await new Promise((resolve, reject) => {
 				accDoc.save(function (e) {
-					if (e) reject(e)
-					resolve()
+					if (e) { reject(e) }
+					else {
+						console.log('successful signup');
+						result.message = ''
+						resolve()
+
+					}
+
 				})
 			})
 		}//end try
 		catch (e) {
-			if (typeof e === "string") result.reason = e
+			if (typeof e === "string") result.message = e
 			else {
-				result.reason = "Server error"
+				result.message = "Server error"
 				console.log(e)
 			}
 		}//end catch
@@ -89,46 +115,109 @@ module.exports = class API {
 
 	static async verify(req, res) {
 		console.log('verify');
+		var result = { success: false, message: '' }
+
+		let username = req.body.username;
+		let secret = '';
+		var foundDoc = await new Promise((resolve, reject) => {
+			AccModel.findOne({ username: username }, function (err, doc) {
+				if (err) reject(err)
+				resolve(doc)
+			})
+		})
+
+		if (foundDoc) {
+			secret = foundDoc.secret
+		}
+
+		var json = {
+			secret: secret, //secret from db belong to the username 
+			encoding: secretEncoding,
+			token: req.body.token, //6 digit token from API
+		}
+		console.log(json);
+		var result;
+		try {
+			const flag = speakeasy.totp.verify(json);
+			if (flag == true) {
+				result.success = true;
+				result.message = '';
+			}
+			else {
+				result.success = false;
+				result.message = 'Invalid Token';
+			}
+
+		}
+		catch (e) {
+			console.log(e)
+		}
+
+		console.log(result);
+		res.json(result)
+	}
+
+	static async delete(req, res) {
+		console.log('delete');
 		//body format 
 		//    json = {
 		//     secret: CustomStorage.getItem("2FA"),
 		//     token: inputCurrent,
 		//   };
 		var body = req.body;
-		console.log(body);
-		var result;
+
+		var result = { success: false, message: '' }
+		let username = body.username
+
 		try {
-			body.encoding = secretEncoding;
-			result = speakeasy.totp.verify(body);
+			var foundDoc = await new Promise((resolve, reject) => {
+				AccModel.findOne({ username: username, source: sourceChannel }, function (err, doc) {
+					if (err) reject(err)
+					resolve(doc)
+				})
+			})
+
+			if (!foundDoc) {
+				throw "Error: Account does not exists with this username!"
+			}
+			console.log('foundDoc');
+			console.log(foundDoc);
+			let temp = await AccModel.findByIdAndDelete(foundDoc._id);
+			console.log('temp');
+			console.log(temp);
+			console.log("Deleted user: ", temp.username);
+			result.success = true
+			result.message = "Deleted user: ", temp.username
 		}
 		catch (e) {
+			result.message = 'Unable to delete user collection'
 			console.log(e)
 		}
 		console.log(result);
 		res.json(result)
 	}
 
-	static async delete(req, res) {
-		console.log('verify');
-		//body format 
-		//    json = {
-		//     secret: CustomStorage.getItem("2FA"),
-		//     token: inputCurrent,
-		//   };
+	static async getStatus(req, res) {
+		console.log('get status');
+		var result = { success: false, secret: '', message: '' }
 		var body = req.body;
-		console.log(body);
-		var result = { success: false }
-		try {
-			let userName = body.userName;
-			let sourceChannel = body.sourceChannel;
-			let temp = await AccModel.findByIdAndDelete(userName);
-			console.log("Deleted user: ", temp);
+		let username = body.username;
+		var foundDoc = await new Promise((resolve, reject) => {
+			AccModel.findOne({ username: username }, function (err, doc) {
+				if (err) reject(err)
+				resolve(doc)
+			})
+		})
+
+		if (!foundDoc) {
+			result.secret = ''
+			result.message = "Error: Account not exists with this username!"
+		}
+		else {
 			result.success = true
+			result.secret = foundDoc.secret
+			result.message = ''
 		}
-		catch (e) {
-			console.log(e)
-		}
-		console.log(result);
 		res.json(result)
 	}
 }
