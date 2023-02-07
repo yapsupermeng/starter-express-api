@@ -50,6 +50,13 @@ module.exports = class API {
     try {
       if (!req.body.username) throw "Missing username";
       if (!req.body.secret) throw "Missing secret";
+
+      var json = {
+        secret: req.body.secret, //secret from db belong to the username
+        encoding: secretEncoding,
+        token: req.body.token, //6 digit token from API
+      };
+      console.log(json);
       const flag = speakeasy.totp.verify(json);
       if (flag != true) {
         throw "Invalid Token";
@@ -64,12 +71,6 @@ module.exports = class API {
       });
       if (foundDoc) throw "Error: Account already exists with this username!";
 
-      var json = {
-        secret: req.body.secret, //secret from db belong to the username
-        encoding: secretEncoding,
-        token: req.body.token, //6 digit token from API
-      };
-      console.log(json);
       var result;
 
       //Prepare data to save
